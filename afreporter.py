@@ -153,7 +153,7 @@ def checklag():
 				'siprop':'dbrepllag'
 			}
 			req = api.APIRequest(site, params)
-			res = req.query()
+			res = req.query(False)
 			maxlag = res['query']['dbrepllag'][0]['lag']
 			# If maxlag is too high, just stop
 			if maxlag > 600 and not waited:
@@ -206,7 +206,7 @@ def logFromAPI(lasttime):
 		'afldir':'newer',
 	}
 	req = api.APIRequest(site, params)
-	res = req.query()	
+	res = req.query(False)	
 	rows = res['query']['abuselog']
 	if len(rows) > 0:
 		del rows[0] # The API uses >=, so the first row will be the same as the last row of the last set
@@ -386,7 +386,7 @@ def filterName(filterid):
 		'abflimit':1
 	}
 	req = api.APIRequest(site, params, False)
-	res = req.query()
+	res = req.query(False)
 	name = res['query']['abusefilters'][0]['description']
 	namecache[filterid] = name
 	return name
