@@ -382,7 +382,7 @@ def reportUser(u, filter=None, hit=None):
 
 namecache = timedTracker(expiry=86400)
 
-def reportUser(u, filter=None, hit=None):
+def reportUserUAA(u, filter=None, hit=None):
 	if u.isBlocked():
 		return
 	username = u.name.encode('utf8')
