@@ -36,6 +36,7 @@ site = wiki.Wiki()
 site.setMaxlag(-1)
 site.login(settings.bot, settings.botpass)
 AIV = page.Page(site, 'Wikipedia:Administrator intervention against vandalism/TB2')
+UAA = page.Page(site, 'Wikipedia:Usernames for administrator attention/Bot')
 
 #TODO: Abuse log now available on Wikimedia IRC
 
@@ -269,6 +270,7 @@ def main():
 	AIVut = timedTracker() # user tracker for AIV
 	IRCreported = timedTracker(expiry=60)
 	AIVreported = timedTracker(expiry=600)
+	UAAreported = timedTracker(expiry=600)
 	titles = timedTracker() # this only reports to IRC for now
 	(lasttime, lastid) = getStart()
 	LogActive = True
