@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2013 Alex Zaddach (mrzmanwiki@gmail.com)
+# Copyright 2013 Alex Zaddach (mrzmanwiki@gmail.com). Derative work/modified by 'John Smith' (DatGuy)
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
