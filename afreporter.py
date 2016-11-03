@@ -125,6 +125,7 @@ class StartupChecker(threading.Thread):
 	
 immediate = set() 
 vandalism = set()
+UAAreport = set()
 useAPI = False
 
 def checklag():
@@ -251,12 +252,12 @@ def main():
 	sc = StartupChecker()
 	sc.start()
 	getLists()
-	if not immediate or not vandalism:
+	if not immediate or not vandalism or not UAAreport:
 		raise Exception("Lists not initialised")
 	listcheck = time.time()
 	Cchannel = "#wikipedia-en-abuse-log"
 	Cserver = "irc.freenode.net"
-	nickname = "MrZ-bot"
+	nickname = "DatBot II"
 	cbot = CommandBot(Cchannel, nickname, Cserver)
 	cThread = BotRunnerThread(cbot)
 	cThread.daemon = True
@@ -268,6 +269,7 @@ def main():
 	lagcheck = time.time()
 	IRCut = timedTracker() # user tracker for IRC
 	AIVut = timedTracker() # user tracker for AIV
+	UAAut = timedTracker() # user tracker for UAA, not sure if this will work
 	IRCreported = timedTracker(expiry=60)
 	AIVreported = timedTracker(expiry=600)
 	UAAreported = timedTracker(expiry=600)
@@ -299,7 +301,10 @@ def main():
 			filter = row['f']
 			timestamp = row['ts']
 			u = user.User(site, row['u'], check=False)
-			username = u.name.encode('utf8')			
+			username = u.name.encode('utf8')
+			# Check if should report to UAA
+			if filter in UAAreport and not username in UAAreported:
+				reportUserUAA(u, filter=filter)
 			# Check against 'immediate' list before doing anything
 			if filter in immediate and not username in AIVreported:
 				reportUser(u, filter=filter, hit=logid)
@@ -376,6 +381,28 @@ def reportUser(u, filter=None, hit=None):
 		AIV.edit(appendtext=line, summary=editsum)
 
 namecache = timedTracker(expiry=86400)
+
+def reportUser(u, filter=None, hit=None):
+	if u.isBlocked():
+		return
+	username = u.name.encode('utf8')
+	if filter:
+		name = filterName(filter)
+		reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s) "\
+		"([{{fullurl:Special:AbuseLog|details=%(h)d}} details])."\
+		% {'f':filter, 'n':name, 'h':hit}
+	editsum = "Reporting [[Special:Contributions/%s]]" % (username)
+	else:
+		line = "\n* {{User-uaa|1=%s}} - " % (username)
+	line = line.decode('utf8')
+	line += reason+" ~~~~"
+	try:
+		UAA.edit(appendtext=line, summary=editsum)
+	except api.APIError: # hacky workaround for mystery error
+		time.sleep(1)
+		UAA.edit(appendtext=line, summary=editsum)
+
+namecache = timedTracker(expiry=86400)
 	
 def filterName(filterid):
 	filterid = str(filterid)
@@ -394,14 +421,14 @@ def filterName(filterid):
 	return name
 	
 def getLists():
-	global immediate, vandalism
-	lists = page.Page(site, "User:Mr.Z-bot/filters.js", check=False)
+	global immediate, vandalism, UAAreport
+	lists = page.Page(site, "User:DatBot II/filters.js", check=False)
 	cont = lists.getWikiText(force=True)
 	lines = cont.splitlines()
 	for line in lines:
 		if line.startswith('#') or not line:
 			continue
-		if line.startswith('immediate') or line.startswith('vandalism'):
+		if line.startswith('immediate') or line.startswith('vandalism') or line.startswith('UAAreport'):
 			(type, filters) = line.split('=')
 			type = type.strip()
 			filters = validateFilterList(filters, type)
@@ -409,13 +436,14 @@ def getLists():
 				sendToChannel("Syntax error detected in filter list page - [[User:Mr.Z-bot/filters.js]]")
 	vandalism = set([str(f) for f in vandalism])
 	immediate = set([str(f) for f in immediate])
+	UAAreport = set([str(f) for f in UAAreport])
 			
 validate = re.compile('^[0-9, ]*?$')
 def validateFilterList(filters, type):
-	global immediate, vandalism
+	global immediate, vandalism, UAAreport
 	if not validate.match(filters):
 		return False
-	elif not type in ('immediate', 'vandalism'):
+	elif not type in ('immediate', 'vandalism','UAAreport'):
 		return False
 	else:
 		prev = eval(type)
