@@ -419,7 +419,7 @@ def filterName(filterid):
 	
 def getLists():
 	global immediate, vandalism, UAAreport
-	lists = page.Page(site, "User:DatBot/filters.js", check=False)
+	lists = page.Page(site, "User:DatBot/filters", check=False)
 	cont = lists.getWikiText(force=True)
 	lines = cont.splitlines()
 	for line in lines:
@@ -430,7 +430,7 @@ def getLists():
 			type = type.strip()
 			filters = validateFilterList(filters, type)
 			if not filters:
-				sendToChannel("Syntax error detected in filter list page - [[User:Mr.Z-bot/filters.js]]")
+				sendToChannel("Syntax error detected in filter list page - [[User:DatBot/filters]]")
 	vandalism = set([str(f) for f in vandalism])
 	immediate = set([str(f) for f in immediate])
 	UAAreport = set([str(f) for f in UAAreport])
