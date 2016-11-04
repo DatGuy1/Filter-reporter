@@ -353,7 +353,26 @@ def main():
 			lasttime = last['ts']
 		time.sleep(1.5)
 
-
+def reportUserUAA(u, filter=None, hit=None):
+	if u.isBlocked():
+		return
+	username = u.name.encode('utf8')
+	if filter:
+		name = filterName(filter)
+		reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s) "\
+		"([{{fullurl:Special:AbuseLog|details=%(h)d}} details])."\
+		% {'f':filter, 'n':name, 'h':hit}
+	editsum = "Reporting [[Special:Contributions/%s]]" % (username)
+	else:
+		line = "\n* {{User-uaa|1=%s}} - " % (username)
+	line = line.decode('utf8')
+	line += reason+" ~~~~"
+	try:
+		UAA.edit(appendtext=line, summary=editsum)
+	except api.APIError: # hacky workaround for mystery error
+		time.sleep(1)
+		UAA.edit(appendtext=line, summary=editsum)
+		
 def reportUser(u, filter=None, hit=None):
 	if u.isBlocked():
 		return
@@ -379,28 +398,6 @@ def reportUser(u, filter=None, hit=None):
 	except api.APIError: # hacky workaround for mystery error
 		time.sleep(1)
 		AIV.edit(appendtext=line, summary=editsum)
-
-namecache = timedTracker(expiry=86400)
-
-def reportUserUAA(u, filter=None, hit=None):
-	if u.isBlocked():
-		return
-	username = u.name.encode('utf8')
-	if filter:
-		name = filterName(filter)
-		reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s) "\
-		"([{{fullurl:Special:AbuseLog|details=%(h)d}} details])."\
-		% {'f':filter, 'n':name, 'h':hit}
-	editsum = "Reporting [[Special:Contributions/%s]]" % (username)
-	else:
-		line = "\n* {{User-uaa|1=%s}} - " % (username)
-	line = line.decode('utf8')
-	line += reason+" ~~~~"
-	try:
-		UAA.edit(appendtext=line, summary=editsum)
-	except api.APIError: # hacky workaround for mystery error
-		time.sleep(1)
-		UAA.edit(appendtext=line, summary=editsum)
 
 namecache = timedTracker(expiry=86400)
 	
