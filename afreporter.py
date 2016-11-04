@@ -257,7 +257,7 @@ def main():
 	listcheck = time.time()
 	Cchannel = "#wikipedia-en-abuse-log"
 	Cserver = "irc.freenode.net"
-	nickname = "DatBot II"
+	nickname = "DatBot"
 	cbot = CommandBot(Cchannel, nickname, Cserver)
 	cThread = BotRunnerThread(cbot)
 	cThread.daemon = True
@@ -419,7 +419,7 @@ def filterName(filterid):
 	
 def getLists():
 	global immediate, vandalism, UAAreport
-	lists = page.Page(site, "User:DatBot II/filters.js", check=False)
+	lists = page.Page(site, "User:DatBot/filters.js", check=False)
 	cont = lists.getWikiText(force=True)
 	lines = cont.splitlines()
 	for line in lines:
