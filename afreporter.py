@@ -28,7 +28,6 @@ import datetime
 import json
 import cookielib
 import urllib
-import socket
 import time
 import os
 import warnings
@@ -39,9 +38,7 @@ try:
 	import cPickle as pickle
 except:
 	import pickle
-username = 'DatBot'
-from getpass import getpass
-password = 'redacted'
+#Not sure if all these modules are even neccesary. os, wikitools, and datetime are the main ones
 connections = {}
 IRCActive = False
 LogActive = False
@@ -53,11 +50,6 @@ AIV = page.Page(site, 'Wikipedia:Administrator intervention against vandalism/TB
 UAA = page.Page(site, 'Wikipedia:Usernames for administrator attention/Bot')
 
 #TODO: Abuse log now available on Wikimedia IRC
-
-zero      = 0                   # Zero
-one       = 1                   # One
-false     = 0                   # Boolean False
-true      = 1                   # Boolean True
 
 class timedTracker(dict):
 	def __init__(self, args={}, expiry=300):
@@ -116,12 +108,12 @@ class CommandBot(SingleServerIRCBot):
 
 	def on_welcome(self, c, e):
 		global connections, IRCActive
+		print "in on_welcome"
 		c.privmsg("NickServ", "identify redacted")
 		time.sleep(3)
 		c.join(self.channel)
 		connections['command'] = c
 		IRCActive = True
-		sendToChannel("Bot initialised")
 		return
 
 class BotRunnerThread(threading.Thread):
@@ -131,44 +123,20 @@ class BotRunnerThread(threading.Thread):
 		
 	def run(self):
 		self.bot.start()
-Replies = dict()
-Replies ['!bug'] = "Report any bugs you can find or feature requests you have at https://github.com/DatGuy1/Filter-reporter/issues"
-Replies ['!ping'] = "Pang. Whoo-whoo-whoo-whoo, staying alive. Staying alive."
-#Doesn't work for now
-
-def ping():
-    global ircsock
-    ircsock.send ("PONG :pingis\n")
-
-def sendmsg (chan, msg):
-    global ircsock
-    ircsock.send ("PRIVMSG "+ chan +" :"+ msg + "\n")
 
 def sendToChannel(msg):
 	#CHANGE THIS VALUE AS WELL FOR DEBUGGING CHANNEL
 	connections['command'].privmsg("#wikipedia-en-abuse-log", msg)
 
-def JoinChan (chan):
-    global ircsock
-    ircsock.send ("JOIN "+ chan +"\n")
-
-botnick = "DatBot"
-bufsize = 2048
-channel = "#wikipedia-en-abuse-log"
-chan = "#wikipedia-en-abuse-log"
-port = 6667
-server = "irc.freenode.net"
-master = "DatGuy"
-uname = "DatBot1"
-realname = "DatBot2"
-#Note - Not all of it will be used. Please do not remove random perhaps duplicate stuff you see.
-
 class StartupChecker(threading.Thread):
 	def run(self):
 		global IRCActive, LogActive
 		time.sleep(60)
-		if not IRCActive or not LogActive:
-			print "Init fail"
+		if not IRCActive:
+			print "IRCActive failed"
+			thread.interrupt_main()
+		if not LogActive:
+			print "LogActive failed"
 			thread.interrupt_main()
 	
 immediate = set() 
@@ -179,21 +147,24 @@ useAPI = False
 def checklag():
 	global connections, useAPI
 	waited = False
-	try:	
-		testdb = MySQLdb.connect(
-    			testdb='enwiki_p', host="enwiki.labsdb", user=user, passwd=password)
-		testcursor = testdb.cursor()
-	except: # server down
-		useAPI = True
-		return False
+	try:
+		config = ConfigParser.ConfigParser()
+		config.read('replica.my.cnf')
+		user = config.get('client', 'user').strip().strip("'")
+		password = config.get('client', 'password').strip().strip("'")
+                testdb = MySQLdb.connect(db='enwiki_p', host="enwiki.labsdb", user=user, passwd=password)
+                testcursor = testdb.cursor()
+
+        except: # server down
+                pass
+                #return False
 	while True:
 		# Check replag
 		testcursor.execute('SELECT UNIX_TIMESTAMP() - UNIX_TIMESTAMP(rc_timestamp) FROM recentchanges ORDER BY rc_timestamp DESC LIMIT 1')
 		replag = testcursor.fetchone()[0]
 		# Fallback to API if replag is too high
 		if replag > 300 and not useAPI:
-			useAPI = True
-			sendToChannel("Labs replag too high, using API fallback")
+			sendToChannel("Labs replag is high")
 		if replag < 120 and useAPI:
 			sendToChannel("Using Labs database")
 			useAPI = False
@@ -303,7 +274,7 @@ def logFromDB(lastid):
 	return ret	
 	
 def main():
-	global connections, LogActive, ircsock, Replies
+	global connections, LogActive
 	sc = StartupChecker()
 	sc.start()
 	getLists()
@@ -319,6 +290,7 @@ def main():
 	cThread.start()
 	while len(connections) != 1:
 		time.sleep(2)
+		print("In while")
 	time.sleep(5)
 	checklag()
 	lagcheck = time.time()
@@ -331,10 +303,6 @@ def main():
 	titles = timedTracker() # this only reports to IRC for now
 	(lasttime, lastid) = getStart()
 	LogActive = True
-	pattern1 = '.*:(\w+)\W*%s\W*$' % (botnick)
-    	pattern2 = '.*:%s\W*(\w+)\W*$' % (botnick)
-	ircsock = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
-	ircsock.connect ((server, port))
 	while True:
 		if time.time() > listcheck+300:
 			getLists()
@@ -345,10 +313,7 @@ def main():
 			if lag:
 				db.ping()
 				(lasttime, lastid) = getStart()
-		if useAPI:
-			rows = logFromAPI(lasttime)
-		else:
-			rows = logFromDB(lastid)
+		rows = logFromDB(lastid)
 		attempts = []
 		for row in rows:
 			logid = row['l']
@@ -360,8 +325,6 @@ def main():
 			filter = row['f']
 			timestamp = row['ts']
 			username = row['u']
-			#u = user.User(site, row['u'], check=False)
-			#username = u.name.encode('utf8')
 			# Check if should report to UAA
 			#sendToChannel("Filter " + filter + " has been triggered. The filter is named " + filterName(filter))
 			if filter in UAAreport and not username in UAAreported:
@@ -380,19 +343,20 @@ def main():
 			# IRC reporting checks
 			IRCut[username]+=1
 			# 5 hits in 5 mins
-			if title == "Special:UserLogin":
+			if title == 'Special:UserLogin':
 				break
-			elif title == "Special:Special:UserLogin":
+			elif title == 'UserLogin':
 				break
-			if IRCut[username] == 5 and not username in IRCreported:
-				sendToChannel("!alert - [[User:%s]] has tripped 5 filters within the last 5 minutes: "\
+			if IRCut[username] == 5 and filter in vandalism and not username in IRCreported:
+				username.replace(" ","_")
+				sendToChannel("!alert - User:%s has tripped 5 filters within the last 5 minutes: "\
 				"http://en.wikipedia.org/wiki/Special:AbuseLog?wpSearchUser=%s"\
 				%(username, urllib.quote(username)))
 				del IRCut[username]
 				IRCreported[username] = 1
 			# Hits on pagemoves
 			if action == 'move':
-				sendToChannel("!alert - [[User:%s]] has tripped a filter doing a pagemove"\
+				sendToChannel("!alert - User:%s has tripped a filter doing a pagemove"\
 				": http://en.wikipedia.org/wiki/Special:AbuseLog?details=%s"\
 				%(username, str(logid)))
 			# Frequent hits on one article, would be nice if there was somewhere this could
@@ -400,7 +364,7 @@ def main():
 			titles[(ns,title)]+=1
 			if titles[(ns,title)] == 5 and not (ns,title) in IRCreported:
 				p = page.Page(site, title, check=False, followRedir=False, namespace=ns)
-				sendToChannel("!alert - 5 filters in the last 5 minutes have been tripped on [[%s]]: "\
+				sendToChannel("!alert - 5 filters in the last 5 minutes have been tripped on %s: "\
 				"http://en.wikipedia.org/wiki/Special:AbuseLog?wpSearchTitle=%s"\
 				%(p.title.encode('utf8'), p.urltitle))
 				del titles[(ns,title)]
@@ -421,34 +385,29 @@ def main():
 			lastid = last['l']
 			lasttime = last['ts']
 		time.sleep(1.5)
-		ircmsg = ircsock.recv (bufsize)
-                                # Remove newlines
-        	ircmsg = ircmsg.strip ('\n\r')
-	        m1 = re.match (pattern1, ircmsg, re.I)
-        	m2 = re.match (pattern2, ircmsg, re.I)
-        	if ((m1 == None) and (m2 != None)): m1 = m2
-		if (m1 != None):        # Yes
-            		word = m1.group (1) # Word found
-            		word = word.lower() # Make word lower case
-                                	    # Print a reply
-            		if (word in Replies):
-                		sendmsg (channel, Replies [word])
-                                # If the server  pings us,  then we've
-                                # got to respond!
-        	if ircmsg.find ("PING :") != -1:
-            		ping()
+    
+"""Some of the code below until line 409 is by DeltaQuad (with some adjustment)
+(C) 2016 DeltaQuad (enwp.org/User:DeltaQuad)
+GNU Affero General Public License v3 (AGPL-3.0)
+"""
+def startAllowed(override):
+	override = False
+        if override:
+		return True
+        textpage = page.Page(site, 'User:DatBot/Filter reporter/Run')
+        start = textpage.getWikiText()
+	if start == "Run":
+                return True
+        else:
+                return False
 
-
-def reportUserUAA(username, filter=None, hit=None):
-	#if u.isBlocked():
-		#return
+def reportUserUAA(username, filter=None):
 	if filter:
 		name = filterName(filter)
-		reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s) "\
-		"([{{fullurl:Special:AbuseLog|details=%(h)d}} details])."\
-		% {'f':filter, 'n':name, 'h':hit}
+		reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s)."\
+		% {'f':filter, 'n':name}
 	editsum = "Reporting [[Special:Contributions/%s]]" % (username)
-	line = "\n* {{User-uaa|1=%s}} - " % (username)
+	line = "\n*{{User-uaa|1=%s}} - " % (username)
 	line = line.decode('utf8')
 	line += reason+" ~~~~"
 	try:
@@ -458,8 +417,6 @@ def reportUserUAA(username, filter=None, hit=None):
 		UAA.edit(appendtext=line, summary=editsum)
 		
 def reportUser(username, filter=None, hit=None):
-	#if username.isBlocked():
-		#return
 	if filter:
 		name = filterName(filter)
 		reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s) "\
@@ -470,9 +427,6 @@ def reportUser(username, filter=None, hit=None):
 		"([{{fullurl:Special:AbuseLog|wpSearchUser=%s}} details])."\
 		% (urllib.quote(username))
 	editsum = "Reporting [[Special:Contributions/%s]]" % (username)
-	#if username.isIP:
-		#line = "\n* {{IPvandal|%s}} - " % (username)
-	#else:
 	line = "\n* {{Vandal|%s}} - " % (username)
 	line = line.decode('utf8')
 	line += reason+" ~~~~"
@@ -536,7 +490,6 @@ def validateFilterList(filters, type):
 			exec( type + ' = ' + repr(prev), locals(), globals())
 			return False
 		return True
-		
+  
 if __name__ == "__main__":
 	main()
-	
