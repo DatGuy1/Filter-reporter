@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright 2013 Alex Zaddach (mrzmanwiki@gmail.com). Derative work/modified by 'John Smith' (DatGuy)
 
 # This program is free software: you can redistribute it and/or modify
@@ -16,480 +15,486 @@
 import sys
 from irc.bot import SingleServerIRCBot
 from wikitools import *
-import threading
-import thread
 import time
-import MySQLdb
+import pymysql as MySQLdb
 import urllib
 import os
+import threading
+import thread
 import traceback
 import re
 import datetime
-import json
-import cookielib
-import urllib
 import time
 import os
 import warnings
 import ConfigParser
-from urlparse import urlparse
-from urllib2 import HTTPPasswordMgrWithDefaultRealm
-try:
-	import cPickle as pickle
-except:
-	import pickle
-#Not sure if all these modules are even neccesary. os, wikitools, and datetime are the main ones
+import userpass
 connections = {}
+
 IRCActive = False
 LogActive = False
 
 site = wiki.Wiki()
 site.setMaxlag(-1)
-site.login(username, password)
+site.login(userpass.username, userpass.password)
 AIV = page.Page(site, 'Wikipedia:Administrator intervention against vandalism/TB2')
 UAA = page.Page(site, 'Wikipedia:Usernames for administrator attention/Bot')
+bl = page.Page(site, 'User:DatBot/testing')
 
 #TODO: Abuse log now available on Wikimedia IRC
 
 class timedTracker(dict):
-	def __init__(self, args={}, expiry=300):
-		dict.__init__(self, args)
-		self.expiry = expiry
-		self.times = set()
-		self.times = set([(item, int(time.time())) for item in self.keys()])
-		
-	def __purgeExpired(self):
-		checktime = int(time.time())-self.expiry
-		removed = set([item for item in self.times if item[1] < checktime])
-		self.times.difference_update(removed)
-		[dict.__delitem__(self, item[0]) for item in removed]
-		
-	def __getitem__(self, key):
-		self.__purgeExpired()
-		if not key in self:
-			return 0
-		return dict.__getitem__(self, key)
-	
-	def __setitem__(self, key, value):
-		self.__purgeExpired()
-		if not key in self:
-			self.times.add((key, int(time.time())))
-		return dict.__setitem__(self, key, value)
-	
-	def __delitem__(self, key):
-		self.times = set([item for item in self.times if item[0] != key])
-		self.__purgeExpired()
-		return dict.__delitem__(self, key)
-	
-	def __contains__(self, key):
-		self.__purgeExpired()
-		return dict.__contains__(self, key)
-	
-	def __repr__(self):
-		self.__purgeExpired()
-		return dict.__repr__(self)
-		
-	def __str__(self):
-		self.__purgeExpired()
-		return dict.__str__(self)
-	
-	def keys(self):
-		self.__purgeExpired()
-		return dict.keys(self)
-	
+    def __init__(self, args={}, expiry=300):
+        dict.__init__(self, args)
+        self.expiry = expiry
+        self.times = set()
+        self.times = set([(item, int(time.time())) for item in self.keys()])
+        
+    def __purgeExpired(self):
+        checktime = int(time.time())-self.expiry
+        removed = set([item for item in self.times if item[1] < checktime])
+        self.times.difference_update(removed)
+        [dict.__delitem__(self, item[0]) for item in removed]
+        
+    def __getitem__(self, key):
+        self.__purgeExpired()
+        if not key in self:
+            return 0
+        return dict.__getitem__(self, key)
+    
+    def __setitem__(self, key, value):
+        self.__purgeExpired()
+        if not key in self:
+            self.times.add((key, int(time.time())))
+        return dict.__setitem__(self, key, value)
+    
+    def __delitem__(self, key):
+        self.times = set([item for item in self.times if item[0] != key])
+        self.__purgeExpired()
+        return dict.__delitem__(self, key)
+    
+    def __contains__(self, key):
+        self.__purgeExpired()
+        return dict.__contains__(self, key)
+    
+    def __repr__(self):
+        self.__purgeExpired()
+        return dict.__repr__(self)
+        
+    def __str__(self):
+        self.__purgeExpired()
+        return dict.__str__(self)
+    
+    def keys(self):
+        self.__purgeExpired()
+        return dict.keys(self)
+    
 class CommandBot(SingleServerIRCBot):
 
-	def __init__(self, channel, nickname, server, port=6667):
-		SingleServerIRCBot.__init__(self, [(server, port)], nickname, nickname)
-		self.channel = channel
+    def __init__(self, channel, nickname, server, port=6667):
+        SingleServerIRCBot.__init__(self, [(server, port)], nickname, nickname)
+        self.channel = channel
 
-	def on_nicknameinuse(self, c, e):
-		thread.interrupt_main()
+    def on_nicknameinuse(self, c, e):
+        thread.interrupt_main()
 
-	def on_welcome(self, c, e):
-		global connections, IRCActive
-		print "in on_welcome"
-		c.privmsg("NickServ", "identify redacted")
-		time.sleep(3)
-		c.join(self.channel)
-		connections['command'] = c
-		IRCActive = True
-		return
+    def on_welcome(self, c, e):
+        global connections, IRCActive
+        print "in on_welcome"
+        c.privmsg("NickServ", "identify %s" % userpass.ircpass)
+        time.sleep(3)
+        c.join(self.channel)
+        connections['command'] = c
+        IRCActive = True
+        return
 
 class BotRunnerThread(threading.Thread):
-	def __init__(self, bot):
-		threading.Thread.__init__(self)
-		self.bot = bot
-		
-	def run(self):
-		self.bot.start()
+    def __init__(self, bot):
+        threading.Thread.__init__(self)
+        self.bot = bot
+        
+    def run(self):
+        self.bot.start()
 
 def sendToChannel(msg):
-	#CHANGE THIS VALUE AS WELL FOR DEBUGGING CHANNEL
-	connections['command'].privmsg("#wikipedia-en-abuse-log", msg)
+    #CHANGE THIS VALUE AS WELL FOR DEBUGGING CHANNEL
+    try:
+        connections['command'].privmsg("#wikipedia-en-abuse-log", msg)
+    except:
+        pass
 
 class StartupChecker(threading.Thread):
-	def run(self):
-		global IRCActive, LogActive
-		time.sleep(60)
-		if not IRCActive:
-			print "IRCActive failed"
-			thread.interrupt_main()
-		if not LogActive:
-			print "LogActive failed"
-			thread.interrupt_main()
-	
+    def run(self):
+        global IRCActive, LogActive
+        time.sleep(60)
+        if not IRCActive or not LogActive:
+            print "Init failed"
+            thread.interrupt_main()
+    
 immediate = set() 
 vandalism = set()
 UAAreport = set()
 useAPI = False
 
 def checklag():
-	global connections, useAPI
-	waited = False
-	try:
-		config = ConfigParser.ConfigParser()
-		config.read('replica.my.cnf')
-		user = config.get('client', 'user').strip().strip("'")
-		password = config.get('client', 'password').strip().strip("'")
-                testdb = MySQLdb.connect(db='enwiki_p', host="enwiki.labsdb", user=user, passwd=password)
-                testcursor = testdb.cursor()
-
-        except: # server down
-                pass
-                #return False
-	while True:
-		# Check replag
-		testcursor.execute('SELECT UNIX_TIMESTAMP() - UNIX_TIMESTAMP(rc_timestamp) FROM recentchanges ORDER BY rc_timestamp DESC LIMIT 1')
-		replag = testcursor.fetchone()[0]
-		# Fallback to API if replag is too high
-		if replag > 300 and not useAPI:
-			sendToChannel("Labs replag is high")
-		if replag < 120 and useAPI:
-			sendToChannel("Using Labs database")
-			useAPI = False
-		# Check maxlag if we're using the API
-		if useAPI:
-			params = {'action':'query',
-				'meta':'siteinfo',
-				'siprop':'dbrepllag'
-			}
-			req = api.APIRequest(site, params)
-			res = req.query(False)
-			maxlag = res['query']['dbrepllag'][0]['lag']
-			# If maxlag is too high, just stop
-			if maxlag > 600 and not waited:
-				waited = True
-				sendToChannel("Server lag too high, stopping reports")
-			if waited and maxlag > 120:
-				time.sleep(120)
-				continue
-		break			
-	if waited:
-		sendToChannel("Restarting reports")
-		return True
-	return False
+    global connections, useAPI
+    waited = False
+    try:
+        config = ConfigParser.ConfigParser()
+        config.read('replica.my.cnf')
+        sqluser = config.get('client', 'user').strip().strip("'")
+        passwd = config.get('client', 'password').strip().strip("'")
+        testdb = MySQLdb.connect(db='enwiki_p', host="enwiki.labsdb", user=sqluser, password=passwd)
+        testcursor = testdb.cursor()
+    except: # server down
+		useAPI = True
+		return False
+    while True:
+        # Check replag
+        testcursor.execute('SELECT UNIX_TIMESTAMP() - UNIX_TIMESTAMP(rc_timestamp) FROM recentchanges ORDER BY rc_timestamp DESC LIMIT 1')
+        replag = testcursor.fetchone()[0]
+        # Fallback to API if replag is too high
+        if replag > 300 and not useAPI:
+            useAPI = True
+            sendToChannel("Labs replag too high, falling back to API")
+        if replag < 120 and useAPI:
+            sendToChannel("Using Labs database")
+            useAPI = False
+        # Check maxlag if we're using the API
+        if useAPI:
+            params = {'action':'query',
+                'meta':'siteinfo',
+                'siprop':'dbrepllag'
+            }
+            req = api.APIRequest(site, params)
+            res = req.query(False)
+            maxlag = res['query']['dbrepllag'][0]['lag']
+            # If maxlag is too high, just stop
+            if maxlag > 600 and not waited:
+                waited = True
+                sendToChannel("Server lag too high, stopping reports")
+            if waited and maxlag > 120:
+                time.sleep(120)
+                continue
+        break           
+    if waited:
+        sendToChannel("Restarting reports")
+        return True
+    return False
 
 config = ConfigParser.ConfigParser()
 config.read('replica.my.cnf')
-user = config.get('client', 'user').strip().strip("'")
-password = config.get('client', 'password').strip().strip("'")
+sqluser = config.get('client', 'user').strip().strip("'")
+passwd = config.get('client', 'password').strip().strip("'")
 
 db = MySQLdb.connect(
-    db='enwiki_p', host="enwiki.labsdb", user=user, passwd=password)	
+    db='enwiki_p', host="enwiki.labsdb", user=sqluser, password=passwd)
+db.ping(True)
 db.autocommit(True)
 cursor = db.cursor()
-	
+   	 
 def getStart():
-	if useAPI:
-		params = {'action':'query',
-			'list':'abuselog',
-			'aflprop':'ids|timestamp',
-			'afllimit':'1',
-		}
-		req = api.APIRequest(site, params)
-		res = req.query(False)
-		row = res['query']['abuselog'][0]
-		lasttime = row['timestamp']
-		lastid = row['id']
-	else:
-		cursor.execute('SELECT afl_timestamp, afl_id FROM abuse_filter_log ORDER BY afl_id DESC LIMIT 1')
-		(lasttime, lastid) = cursor.fetchone()
-	return (lasttime, lastid)
-	
-def normTS(ts): # normalize a timestamp to the API format
-	ts = str(ts)
-	if 'Z' in ts:
-		return ts
-	ts = datetime.datetime.strptime(ts, "%Y%m%d%H%M%S")
-	return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
-	
-def logFromAPI(lasttime):
-	lasttime = normTS(lasttime)
-	params = {'action':'query',
-		'list':'abuselog',
-		'aflstart':lasttime,
-		'aflprop':'ids|user|action|title|timestamp',
-		'afllimit':'50',
-		'afldir':'newer',
-	}
-	req = api.APIRequest(site, params)
-	res = req.query(False)	
-	rows = res['query']['abuselog']
-	if len(rows) > 0:
-		del rows[0] # The API uses >=, so the first row will be the same as the last row of the last set
-	ret = []
-	for row in rows:
-		entry = {}
-		entry['l'] = row['id']
-		entry['a'] = row['action']
-		entry['ns'] = row['ns']
-		p = page.Page(site, row['title'], check=False)
-		entry['t'] = p.unprefixedtitle
-		entry['u'] = row['user']
-		entry['ts'] = row['timestamp']
-		entry['f'] = str(row['filter_id'])
-		ret.append(entry)
-	return ret	
-	
-def logFromDB(lastid):
-	query = """SELECT SQL_NO_CACHE afl_id, afl_action, afl_namespace, afl_title, 
-	afl_user_text, afl_timestamp, afl_filter FROM abuse_filter_log
-	WHERE afl_id > %s ORDER BY afl_id ASC""" % lastid
-	rowcount = cursor.execute(query)
-	ret = []
-	res = cursor.fetchall()
-	for row in res:
-		entry = {}
-		entry['l'] = row[0]
-		entry['a'] = row[1]
-		entry['ns'] = row[2]
-		print row
-		p = page.Page(site, row[3], check=False, namespace=row[2])
-		entry['t'] = p.unprefixedtitle
-		entry['u'] = row[4]
-		entry['ts'] = row[5]
-		entry['f'] = row[6]
-		ret.append(entry)
-	return ret	
-	
-def main():
-	global connections, LogActive
-	sc = StartupChecker()
-	sc.start()
-	getLists()
-	if not immediate or not vandalism or not UAAreport:
-		raise Exception("Lists not initialised")
-	listcheck = time.time()
-	Cchannel = "#wikipedia-en-abuse-log"
-	Cserver = "irc.freenode.net"
-	nickname = "DatBot"
-	cbot = CommandBot(Cchannel, nickname, Cserver)
-	cThread = BotRunnerThread(cbot)
-	cThread.daemon = True
-	cThread.start()
-	while len(connections) != 1:
-		time.sleep(2)
-		print("In while")
-	time.sleep(5)
-	checklag()
-	lagcheck = time.time()
-	IRCut = timedTracker() # user tracker for IRC
-	AIVut = timedTracker() # user tracker for AIV
-	UAAut = timedTracker() # user tracker for UAA
-	IRCreported = timedTracker(expiry=60)
-	AIVreported = timedTracker(expiry=300)
-	UAAreported = timedTracker(expiry=300)
-	titles = timedTracker() # this only reports to IRC for now
-	(lasttime, lastid) = getStart()
-	LogActive = True
-	while True:
-		if time.time() > listcheck+300:
-			getLists()
-			listcheck = time.time()
-		if time.time() > lagcheck+600:
-			lag = checklag()
-			lagcheck = time.time()
-			if lag:
-				db.ping()
-				(lasttime, lastid) = getStart()
-		rows = logFromDB(lastid)
-		attempts = []
-		for row in rows:
-			logid = row['l']
-			if logid <= lastid:
-				continue
-			action = row['a']
-			ns = row['ns']
-			title = row['t']
-			filter = row['f']
-			timestamp = row['ts']
-			username = row['u']
-			# Check if should report to UAA
-			#sendToChannel("Filter " + filter + " has been triggered. The filter is named " + filterName(filter))
-			if filter in UAAreport and not username in UAAreported:
-				sendToChannel("Reporting https://en.wikipedia.org/wiki/Special:Contributions/" + username + " to UAA for tripping https://en.wikipedia.org/wiki/Special:AbuseFilter/" + filter)
-				reportUserUAA(username, filter=filter)
-				UAAreported[username] = 1
-			# Check against 'immediate' list before doing anything
-			if filter in immediate and not username in AIVreported:
-				sendToChannel("Immediate report for https://en.wikipedia.org/wiki/Special:Contributions/" + username + " due to tripping https://en.wikipedia.org/wiki/Special:AbuseFilter/" + filter)
-				reportUser(username, filter=filter, hit=logid)
-				AIVreported[username] = 1
-			# Prevent multiple hits from the same edit attempt
-			if (username, timestamp) in attempts:
-				continue
-			attempts.append((username, timestamp))
-			# IRC reporting checks
-			IRCut[username]+=1
-			# 5 hits in 5 mins
-			if title == 'Special:UserLogin':
-				break
-			elif title == 'UserLogin':
-				break
-			if IRCut[username] == 5 and filter in vandalism and not username in IRCreported:
-				username.replace(" ","_")
-				sendToChannel("!alert - User:%s has tripped 5 filters within the last 5 minutes: "\
-				"http://en.wikipedia.org/wiki/Special:AbuseLog?wpSearchUser=%s"\
-				%(username, urllib.quote(username)))
-				del IRCut[username]
-				IRCreported[username] = 1
-			# Hits on pagemoves
-			if action == 'move':
-				sendToChannel("!alert - User:%s has tripped a filter doing a pagemove"\
-				": http://en.wikipedia.org/wiki/Special:AbuseLog?details=%s"\
-				%(username, str(logid)))
-			# Frequent hits on one article, would be nice if there was somewhere this could
-			# be reported on-wiki
-			titles[(ns,title)]+=1
-			if titles[(ns,title)] == 5 and not (ns,title) in IRCreported:
-				p = page.Page(site, title, check=False, followRedir=False, namespace=ns)
-				sendToChannel("!alert - 5 filters in the last 5 minutes have been tripped on %s: "\
-				"http://en.wikipedia.org/wiki/Special:AbuseLog?wpSearchTitle=%s"\
-				%(p.title.encode('utf8'), p.urltitle))
-				del titles[(ns,title)]
-				IRCreported[(ns,title)] = 1
-			# AIV reporting - check if the filter is in one of the lists
-			if filter not in vandalism.union(immediate,UAAreport):
-				continue
-			AIVut[username]+=1
-			UAAut[username]+=1			
-			# 5 hits in 5 minutes
-			if AIVut[username] == 5 and not username in AIVreported:
-				del AIVut[username]
-				reportUser(username)
-				AIVreported[username] = 1
-		if rows:
-			rows.reverse()
-			last = rows[0]
-			lastid = last['l']
-			lasttime = last['ts']
-		time.sleep(1.5)
+    if useAPI:
+        params = {'action':'query',
+            'list':'abuselog',
+            'aflprop':'ids|timestamp',
+            'afllimit':'1',
+        }
+        req = api.APIRequest(site, params)
+        res = req.query(False)
+        row = res['query']['abuselog'][0]
+        lasttime = row['timestamp']
+        lastid = row['id']
+    else:
+        cursor.execute('SELECT afl_timestamp, afl_id FROM abuse_filter_log ORDER BY afl_id DESC LIMIT 1')
+        (lasttime, lastid) = cursor.fetchone()
+    return (lasttime, lastid)
     
-"""Some of the code below until line 409 is by DeltaQuad (with some adjustment)
-(C) 2016 DeltaQuad (enwp.org/User:DeltaQuad)
-GNU Affero General Public License v3 (AGPL-3.0)
-"""
-def startAllowed(override):
-	override = False
-        if override:
-		return True
-        textpage = page.Page(site, 'User:DatBot/Filter reporter/Run')
-        start = textpage.getWikiText()
-	if start == "Run":
-                return True
+def normTS(ts): # normalize a timestamp to the API format
+    ts = str(ts)
+    if 'Z' in ts:
+        return ts
+    ts = datetime.datetime.strptime(ts, "%Y%m%d%H%M%S")
+    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+def logFromAPI(lasttime):
+    lasttime = normTS(lasttime)
+    params = {'action':'query',
+        'list':'abuselog',
+        'aflstart':lasttime,
+        'aflprop':'ids|user|action|title|timestamp',
+        'afllimit':'50',
+        'afldir':'newer',
+    }
+    req = api.APIRequest(site, params)
+    res = req.query(False)  
+    rows = res['query']['abuselog']
+    if len(rows) > 0:
+        del rows[0] # The API uses >=, so the first row will be the same as the last row of the last set
+    ret = []
+    for row in rows:
+        entry = {}
+        entry['l'] = row['id']
+        entry['a'] = row['action']
+        entry['ns'] = row['ns']
+        p = page.Page(site, row['title'], check=False, namespace=row['ns'])
+        entry['t'] = p.unprefixedtitle
+        entry['u'] = row['user']
+        entry['ts'] = row['timestamp']
+        entry['f'] = str(row['filter_id'])
+        ret.append(entry)
+    return ret  
+    
+def logFromDB(lastid):
+    query = """SELECT SQL_NO_CACHE afl_id, afl_action, afl_namespace, afl_title, 
+    afl_user_text, afl_timestamp, afl_filter FROM abuse_filter_log
+    WHERE afl_id > %s ORDER BY afl_id ASC""" % lastid
+    rowcount = cursor.execute(query)
+    ret = []
+    res = cursor.fetchall()
+    for row in res:
+        entry = {}
+        entry['l'] = row[0]
+        entry['a'] = row[1]
+        entry['ns'] = row[2]
+        p = page.Page(site, row[3], check=False, namespace=row[2])
+        entry['t'] = p.unprefixedtitle
+        entry['u'] = row[4]
+        entry['ts'] = row[5]
+        entry['f'] = row[6]
+        ret.append(entry)
+    return ret  
+    
+def main():
+    global connections, LogActive
+    sc = StartupChecker()
+    sc.start()
+    getLists()
+    if not immediate or not vandalism or not UAAreport:
+        raise Exception("Lists not initialised")
+    listcheck = time.time()
+    Cchannel = "#wikipedia-en-abuse-log"
+    Cserver = "irc.freenode.net"
+    nickname = "DatBot"
+    cbot = CommandBot(Cchannel, nickname, Cserver)
+    cThread = BotRunnerThread(cbot)
+    cThread.daemon = True
+    cThread.start()
+    while len(connections) != 1:
+        time.sleep(2)
+    time.sleep(5)
+    checklag()
+    lagcheck = time.time()
+    IRCut = timedTracker() # user tracker for IRC
+    AIVut = timedTracker() # user tracker for AIV
+    UAAut = timedTracker() # user tracker for UAA
+    IRCreported = timedTracker(expiry=60)
+    AIVreported = timedTracker(expiry=600)
+    UAAreported = timedTracker(expiry=300)
+    titles = timedTracker() # this only reports to IRC for now
+    (lasttime, lastid) = getStart()
+    LogActive = True
+    while True:
+        if time.time() > listcheck+300:
+            getLists()
+            listcheck = time.time()
+        if time.time() > lagcheck+600:
+            lag = checklag()
+            lagcheck = time.time()
+            if lag:
+                db.ping()
+                (lasttime, lastid) = getStart()
+        if useAPI:
+            rows = logFromAPI(lasttime)
         else:
-                return False
+            rows = logFromDB(lastid)
+        attempts = []
+        for row in rows:
+            logid = row['l']
+            if logid <= lastid:
+                continue
+            action = row['a']
+            ns = row['ns']
+            title = row['t']
+            filter = row['f']
+            timestamp = row['ts']
+            u = user.User(site, row['u'])
+            if u.exists	!= True and not u.isIP:
+                continue
+            username = u.name.encode('utf8')
+            if not startAllowed():
+                time.sleep(60)
+                break
+            if filter in UAAreport and not username in UAAreported:
+                sendToChannel("Reporting https://en.wikipedia.org/wiki/Special:Contributions/" + username.replace(" ","_") + " to UAA for tripping https://en.wikipedia.org/wiki/Special:AbuseFilter/" + filter)
+                reportUserUAA(u, filter=filter)
+                UAAreported[username] = 1
 
-def reportUserUAA(username, filter=None):
-	if filter:
-		name = filterName(filter)
-		reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s)."\
-		% {'f':filter, 'n':name}
-	editsum = "Reporting [[Special:Contributions/%s]]" % (username)
-	line = "\n*{{User-uaa|1=%s}} - " % (username)
-	line = line.decode('utf8')
-	line += reason+" ~~~~"
-	try:
-		UAA.edit(appendtext=line, summary=editsum)
-	except api.APIError: # hacky workaround for mystery error
-		time.sleep(1)
-		UAA.edit(appendtext=line, summary=editsum)
-		
-def reportUser(username, filter=None, hit=None):
-	if filter:
-		name = filterName(filter)
-		reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s) "\
-		"([{{fullurl:Special:AbuseLog|details=%(h)d}} details])."\
-		% {'f':filter, 'n':name, 'h':hit}
-	else:
-		reason = "Tripped 5 abuse filters in the last 5 minutes: "\
-		"([{{fullurl:Special:AbuseLog|wpSearchUser=%s}} details])."\
-		% (urllib.quote(username))
-	editsum = "Reporting [[Special:Contributions/%s]]" % (username)
-	line = "\n* {{Vandal|%s}} - " % (username)
-	line = line.decode('utf8')
-	line += reason+" ~~~~"
-	try:
-		AIV.edit(appendtext=line, summary=editsum)
-	except api.APIError: # hacky workaround for mystery error
-		time.sleep(1)
-		AIV.edit(appendtext=line, summary=editsum)
+            if title == 'Special:UserLogin':
+                continue
+            elif title == 'UserLogin':
+                continue
+
+            # Check against 'immediate' list before doing anything
+            if filter in immediate and not username in AIVreported:
+                sendToChannel("Immediate report for https://en.wikipedia.org/wiki/Special:Contributions/" + username.replace(" ", "_") + " due to tripping https://en.wikipedia.org/wiki/Special:AbuseFilter/" + filter)
+                reportUser(u, filter=filter, hit=logid)
+                AIVreported[username] = 1
+            # Prevent multiple hits from the same edit attempt
+            if (username, timestamp) in attempts:
+                continue
+            attempts.append((username, timestamp))
+            # IRC reporting checks
+            IRCut[username]+=1
+            # 5 hits in 5 mins
+            if IRCut[username] == 5 and filter in vandalism and not username in IRCreported:
+                username.replace(" ","_")
+                sendToChannel("!alert - User:%s has tripped 5 filters within the last 5 minutes: "\
+                "http://en.wikipedia.org/wiki/Special:AbuseLog?wpSearchUser=%s"\
+                %(username, urllib.quote(username)))
+                del IRCut[username]
+                IRCreported[username] = 1
+            # Hits on pagemoves
+            if action == 'move':
+                sendToChannel("!alert - User:%s has tripped a filter doing a pagemove"\
+                ": http://en.wikipedia.org/wiki/Special:AbuseLog?details=%s"\
+                %(username, str(logid)))
+            # Frequent hits on one article, would be nice if there was somewhere this could
+            # be reported on-wiki
+            titles[(ns,title)]+=1
+            if titles[(ns,title)] == 5 and not (ns,title) in IRCreported:
+                p = page.Page(site, title, check=False, followRedir=False, namespace=ns)
+                sendToChannel("!alert - 5 filters in the last 5 minutes have been tripped on %s: "\
+                "http://en.wikipedia.org/wiki/Special:AbuseLog?wpSearchTitle=%s"\
+                %(p.title.encode('utf8'), p.urltitle))
+                del titles[(ns,title)]
+                IRCreported[(ns,title)] = 1
+            # AIV reporting - check if the filter is in one of the lists
+            if filter not in vandalism.union(immediate, UAAreport):
+                continue
+            AIVut[username]+=1
+            UAAut[username]+=1          
+            # 5 hits in 5 minutes
+            if AIVut[username] == 5 and not username in AIVreported:
+				del AIVut[username]
+				reportUser(u)
+				AIVreported[username] = 1
+        if rows:
+            rows.reverse()
+            last = rows[0]
+            lastid = last['l']
+            lasttime = last['ts']
+        time.sleep(1.5)
+    
+def startAllowed():
+    textpage = page.Page(site, 'User:DatBot/Filter reporter/Run')
+    start = textpage.getWikiText()
+    if start == "Run":
+    	return True
+    else:
+		return False
+
+def reportUserUAA(u, filter=None):
+    if u.isBlocked():
+        return
+    username = u.name.encode('utf8')
+    if filter:
+        name = filterName(filter)
+        reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s)."\
+        % {'f':filter, 'n':name}
+    editsum = "Reporting [[Special:Contributions/%s]]" % (username)
+    line = "\n*{{user-uaa|1=%s}} - " % (username)
+    line += reason+" ~~~~"
+    try:
+        UAA.edit(appendtext=line, summary=editsum, skipmd5 = True)
+    except api.APIError: # hacky workaround for mystery error
+        time.sleep(1)
+        UAA.edit(appendtext=line, summary=editsum, skipmd5 = True)
+        
+def reportUser(u, filter=None, hit=None):
+    if u.isBlocked():
+        return
+    username = u.name.encode('utf8')
+    if filter:
+        name = filterName(filter)
+        reason = "Tripped [[Special:AbuseFilter/%(f)s|filter %(f)s]] (%(n)s) "\
+        "([{{fullurl:Special:AbuseLog|wpSearchUser=%(h)s}} details])."\
+        % {'f':filter, 'n':name, 'h':urllib.quote(username)}
+    else:
+        reason = "Tripped 5 abuse filters in the last 5 minutes: "\
+        "([{{fullurl:Special:AbuseLog|wpSearchUser=%s}} details])."\
+        % (urllib.quote(username))
+    editsum = "Reporting [[Special:Contributions/%s]]" % (username) 
+
+    if filter:
+        editsum += " for triggering [[Special:AbuseFilter/%s|filter %s]]" % (filter, filter)
+
+    if u.isIP:
+        line = "\n* {{IPvandal|%s}} - " % (username)
+    else:
+        line = "\n* {{Vandal|%s}} - " % (username)
+    line = line.decode('utf8')
+    line += reason+" ~~~~"
+    try:
+        AIV.edit(appendtext=line, summary=editsum, skipmd5 = True)
+    except api.APIError: # hacky workaround for mystery error
+        time.sleep(1)
+        AIV.edit(appendtext=line, summary=editsum, skipmd5 = True)
 
 namecache = timedTracker(expiry=86400)
-	
+    
 def filterName(filterid):
-	filterid = str(filterid)
-	if filterid in namecache:
-		return namecache[filterid]
-	params = {'action':'query', 
-		'list':'abusefilters',
-		'abfprop':'description',
-		'abfstartid':filterid,
-		'abflimit':1
-	}
-	req = api.APIRequest(site, params, False)
-	res = req.query(False)
-	name = res['query']['abusefilters'][0]['description']
-	namecache[filterid] = name
-	return name
-	
+    filterid = str(filterid)
+    if filterid in namecache:
+        return namecache[filterid]
+    params = {'action':'query', 
+        'list':'abusefilters',
+        'abfprop':'description',
+        'abfstartid':filterid,
+        'abflimit':1
+    }
+    req = api.APIRequest(site, params, False)
+    res = req.query(False)
+    name = res['query']['abusefilters'][0]['description']
+    namecache[filterid] = name
+    return name
+    
 def getLists():
-	global immediate, vandalism, UAAreport
-	lists = page.Page(site, "User:DatBot/filters.js", check=False)
-	cont = lists.getWikiText(force=True)
-	lines = cont.splitlines()
-	for line in lines:
-		if line.startswith('#') or not line:
-			continue
-		if line.startswith('immediate') or line.startswith('vandalism') or line.startswith('UAAreport'):
-			(type, filters) = line.split('=')
-			type = type.strip()
-			filters = validateFilterList(filters, type)
-			if not filters:
-				sendToChannel("Syntax error detected in filter list page - [[User:DatBot/filters.js]]")
-	vandalism = set([str(f) for f in vandalism])
-	immediate = set([str(f) for f in immediate])
-	UAAreport = set([str(f) for f in UAAreport])
-			
+    global immediate, vandalism, UAAreport
+    lists = page.Page(site, "User:DatBot/filters", check=False)
+    cont = lists.getWikiText(force=True)
+    lines = cont.splitlines()
+    for line in lines:
+        if line.startswith('#') or line.startswith('<') or not line:
+            continue
+        if line.startswith('immediate') or line.startswith('vandalism') or line.startswith('UAAreport'):
+            (type, filters) = line.split('=')
+            type = type.strip()
+            filters = validateFilterList(filters, type)
+            if not filters:
+                sendToChannel("Syntax error detected in filter list page - [[User:DatBot/filters]]")
+    vandalism = set([str(f) for f in vandalism])
+    immediate = set([str(f) for f in immediate])
+    UAAreport = set([str(f) for f in UAAreport])
+            
 validate = re.compile('^[0-9, ]*?$')
 def validateFilterList(filters, type):
-	global immediate, vandalism, UAAreport
-	if not validate.match(filters):
-		return False
-	elif not type in ('immediate', 'vandalism','UAAreport'):
-		return False
-	else:
-		prev = eval(type)
-		try:
-			exec( type + ' = set([' + filters + '])', locals(), globals())
-		except:
-			exec( type + ' = ' + repr(prev), locals(), globals())
-			return False
-		if not isinstance(eval(type), set):
-			exec( type + ' = ' + repr(prev), locals(), globals())
-			return False
-		return True
-  
+    global immediate, vandalism, UAAreport
+    if not validate.match(filters):
+        return False
+    elif not type in ('immediate', 'vandalism','UAAreport'):
+        return False
+    else:
+        prev = eval(type)
+        try:
+            exec( type + ' = set([' + filters + '])', locals(), globals())
+        except:
+            exec( type + ' = ' + repr(prev), locals(), globals())
+            return False
+        if not isinstance(eval(type), set):
+            exec( type + ' = ' + repr(prev), locals(), globals())
+            return False
+        return True
+
 if __name__ == "__main__":
-	main()
+    main()
